@@ -374,8 +374,11 @@ Creates a network. The optional map accepts config values for enabling ipv6 and 
 
 ## Contributing
 
-Clone this repository and run `script/setup`. This will install a pre-commit hook that
-runs [cljstyle](https://github.com/greglook/cljstyle).
+Clone this repository and run `script/setup`. This will:
+
+* Initialize the [clj-kondo](https://github.com/borkdude/clj-kondo) cache
+* Install a pre-commit hook that runs [cljstyle](https://github.com/greglook/cljstyle)
+  and clj-kondo
 
 ## License
 

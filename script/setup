@@ -4,8 +4,12 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
+echo "Setting up clj-kondo cache..."
+lein clj-kondo --lint "$(lein classpath)" >/dev/null || true
+
 echo "Installing pre-commit hook..."
 mkdir -p .git/hooks
 cp script/pre-commit .git/hooks/pre-commit
 
 echo "Done!"
+

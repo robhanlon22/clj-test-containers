@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-FILES=$(git diff --cached --name-only --diff-filter=ACMR | sed 's| |\\ |g')
+FILES=$(git diff --cached --name-only --diff-filter=ACMR *.clj *.cljs *.cljc *.edn | sed 's| |\\ |g')
 
 if [[ -z "$FILES" ]]; then
   exit 0
@@ -16,4 +16,9 @@ echo "$FILES" | xargs lein cljstyle fix --report
 # Add back the modified/prettified files to staging
 echo "$FILES" | xargs git add
 
+echo "Linting Clojure code..."
+
+echo "$FILES" | grep -v "\.edn$" | xargs lein clj-kondo --lint
+
 echo "Done!"
+

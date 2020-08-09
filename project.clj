@@ -10,13 +10,15 @@
                  [org.testcontainers/testcontainers "1.14.3"]]
 
   :aliases {"test" ["run" "-m" "kaocha.runner"]
-            "cljstyle" ["run" "-m" "cljstyle.main"]}
+            "cljstyle" ["run" "-m" "cljstyle.main"]
+            "clj-kondo" ["run" "-m" "clj-kondo.main"]}
 
   :profiles {:dev {:dependencies [[org.testcontainers/postgresql "1.14.3"]
                                   [lambdaisland/kaocha-cloverage "1.0-45"]
                                   [lambdaisland/kaocha "1.0.641"]
                                   [lambdaisland/kaocha-junit-xml "0.0.76"]
-                                  [mvxcvi/cljstyle "0.13.0" :exclusions [org.clojure/clojure]]]}}
+                                  [mvxcvi/cljstyle "0.13.0" :exclusions [org.clojure/clojure]]
+                                  [clj-kondo "2020.07.29"]]}}
 
   :target-path "target/%s")
 
