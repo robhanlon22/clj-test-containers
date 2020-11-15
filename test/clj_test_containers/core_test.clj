@@ -2,10 +2,21 @@
   (:require
    [clj-test-containers.core :as sut]
    [clojure.string :refer [includes?]]
-   [clojure.test :refer [deftest is testing]])
+   [clojure.test :refer [deftest is testing use-fixtures]])
   (:import
    (org.testcontainers.containers
-    PostgreSQLContainer)))
+    PostgreSQLContainer)
+   (org.testcontainers.utility
+    ResourceReaper)))
+
+(defn perform-cleanup!
+  []
+  (.. ResourceReaper instance performCleanup))
+
+(use-fixtures :each (fn [test-fn]
+                      (perform-cleanup!)
+                      (test-fn)
+                      (perform-cleanup!)))
 
 (deftest create-test
   (testing "Testing basic testcontainer generic image initialisation"
@@ -13,7 +24,7 @@
                                  :exposed-ports [5432]
                                  :env-vars {"POSTGRES_PASSWORD" "pw"}})
           initialized-container (sut/start! container)
-          stopped-container (sut/stop! container)]
+          stopped-container (sut/stop! initialized-container)]
       (is (some? (:id initialized-container)))
       (is (some? (:mapped-ports initialized-container)))
       (is (some? (get (:mapped-ports initialized-container) 5432)))
@@ -33,7 +44,7 @@
                                  :env-vars {"POSTGRES_PASSWORD" "pw"}
                                  :wait-for {:wait-strategy :log :message "accept connections"}})
           initialized-container (sut/start! container)
-          stopped-container (sut/stop! container)]
+          stopped-container (sut/stop! initialized-container)]
       (is (some? (:id initialized-container)))
       (is (some? (:mapped-ports initialized-container)))
       (is (some? (get (:mapped-ports initialized-container) 5432)))
@@ -45,7 +56,7 @@
     (let [container (sut/create-from-docker-file {:exposed-ports [80]
                                                   :docker-file "test/resources/Dockerfile"})
           initialized-container (sut/start! container)
-          stopped-container (sut/stop! container)]
+          stopped-container (sut/stop! initialized-container)]
       (is (some? (:id initialized-container)))
       (is (some? (:mapped-ports initialized-container)))
       (is (some? (get (:mapped-ports initialized-container) 80)))
@@ -57,7 +68,7 @@
     (let [container (sut/init {:container (PostgreSQLContainer. "postgres:12.2")})
           initialized-container (sut/start! container)
           result (sut/execute-command! initialized-container ["whoami"])
-          _stopped-container (sut/stop! container)]
+          _stopped-container (sut/stop! initialized-container)]
       (is (= 0 (:exit-code result)))
       (is (= "root\n" (:stdout result))))))
 
@@ -69,7 +80,7 @@
                                  :env-vars {"POSTGRES_PASSWORD" "pw"}})
           initialized-container (sut/start! container)
           result (sut/execute-command! initialized-container ["whoami"])
-          _stopped-container (sut/stop! container)]
+          _stopped-container (sut/stop! initialized-container)]
       (is (= 0 (:exit-code result)))
       (is (= "root\n" (:stdout result))))))
 
@@ -84,7 +95,7 @@
                                                       :mode :read-only}))
           initialized-container (sut/start! container)
           file-check (sut/execute-command! initialized-container ["tail" "/opt/test.sql"])
-          stopped-container (sut/stop! container)]
+          stopped-container (sut/stop! initialized-container)]
       (is (some? (:id initialized-container)))
       (is (some? (:mapped-ports initialized-container)))
       (is (some? (get (:mapped-ports initialized-container) 5432)))
@@ -101,7 +112,7 @@
                                                 :mode :read-only}))
           initialized-container (sut/start! container)
           file-check (sut/execute-command! initialized-container ["tail" "/opt/README.md"])
-          stopped-container (sut/stop! container)]
+          stopped-container (sut/stop! initialized-container)]
       (is (some? (:id initialized-container)))
       (is (some? (:mapped-ports initialized-container)))
       (is (some? (get (:mapped-ports initialized-container) 5432)))
@@ -118,7 +129,7 @@
                                                        :type :host-path}))
           initialized-container (sut/start! container)
           file-check (sut/execute-command! initialized-container ["tail" "/opt/test.sql"])
-          stopped-container (sut/stop! container)]
+          stopped-container (sut/stop! initialized-container)]
       (is (some? (:id initialized-container)))
       (is (some? (:mapped-ports initialized-container)))
       (is (some? (get (:mapped-ports initialized-container) 5432)))
@@ -136,7 +147,7 @@
                                                        :type :classpath-resource}))
           initialized-container (sut/start! container)
           file-check (sut/execute-command! initialized-container ["tail" "/opt/test.sql"])
-          stopped-container (sut/stop! container)]
+          stopped-container (sut/stop! initialized-container)]
       (is (some? (:id initialized-container)))
       (is (some? (:mapped-ports initialized-container)))
       (is (some? (get (:mapped-ports initialized-container) 5432)))
@@ -155,7 +166,7 @@
                                           :type :host-path})
           file-check (sut/execute-command! initialized-container
                                            ["tail" "/opt/test.sql"])
-          stopped-container (sut/stop! container)]
+          stopped-container (sut/stop! initialized-container)]
       (is (some? (:id initialized-container)))
       (is (some? (:mapped-ports initialized-container)))
       (is (some? (get (:mapped-ports initialized-container) 5432)))
@@ -174,7 +185,7 @@
                                           :type :classpath-resource})
           file-check (sut/execute-command! initialized-container
                                            ["tail" "/opt/test.sql"])
-          stopped-container (sut/stop! container)]
+          stopped-container (sut/stop! initialized-container)]
       (is (some? (:id initialized-container)))
       (is (some? (:mapped-ports initialized-container)))
       (is (some? (get (:mapped-ports initialized-container) 5432)))

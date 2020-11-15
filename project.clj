@@ -12,14 +12,13 @@
   :aliases {"test" ["run" "-m" "kaocha.runner"]
             "cljstyle" ["run" "-m" "cljstyle.main"]}
 
-  :plugins [[jainsahab/lein-githooks "1.0.0"]]
-
   :profiles {:dev {:dependencies [[expound "0.8.5"]
-                                  [lambdaisland/kaocha "1.0.641"]
+                                  [lambdaisland/kaocha "1.0.700"]
                                   [lambdaisland/kaocha-cloverage "1.0-45"]
                                   [lambdaisland/kaocha-junit-xml "0.0.76"]
                                   [lambdaisland/kaocha-junit-xml "0.0.76"]
                                   [mvxcvi/cljstyle "0.14.0" :exclusions [org.clojure/clojure]]
+                                  [orchestra "2020.09.18-1"]
                                   [org.clojure/test.check "1.1.0"]
                                   [org.clojure/tools.namespace "1.0.0"]
                                   [org.testcontainers/postgresql "1.15.0-rc2"]]

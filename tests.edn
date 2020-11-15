@@ -1,6 +1,8 @@
 #kaocha/v1
 {:plugins [:kaocha.plugin/junit-xml
            :kaocha.plugin/cloverage
-           :kaocha.plugin.alpha/spec-test-check]
+           :kaocha.plugin.alpha/spec-test-check
+           :kaocha.plugin/orchestra]
  :reporter [kaocha.report/documentation]
+ :kaocha.plugin.capture-output/capture-output? false
  :kaocha.plugin.junit-xml/target-file "target/junit.xml"}

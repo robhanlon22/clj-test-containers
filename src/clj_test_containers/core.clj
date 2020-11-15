@@ -1,8 +1,10 @@
 (ns clj-test-containers.core
   (:require
-   [clj-test-containers.spec.core :as cs]
-   [clojure.spec.alpha :as s]
-   [clojure.string])
+   [clj-test-containers.interfaces :as i]
+   [clj-test-containers.spec.container :as spec.container]
+   [clj-test-containers.spec.core :as spec]
+   [clojure.string :as str]
+   [orchestra.core :refer [defn-spec]])
   (:import
    (java.nio.file
     Paths)
@@ -19,11 +21,11 @@
    (org.testcontainers.utility
     MountableFile)))
 
-(defn- resolve-bind-mode
-  (^BindMode [bind-mode]
-   (if (= :read-write bind-mode)
-     BindMode/READ_WRITE
-     BindMode/READ_ONLY)))
+(defn-spec ^:private resolve-bind-mode #(instance? BindMode %)
+  ^BindMode [bind-mode ::spec/mode]
+  (if (= :read-write bind-mode)
+    BindMode/READ_WRITE
+    BindMode/READ_ONLY))
 
 (defmulti wait
   "Sets a wait strategy to the container.  Supports :http, :health and :log as
@@ -69,20 +71,23 @@
   Example:
 
   ```clojure
-  (wait {:wait-strategy :log
-         :message \"accept connections\"} container)
+  (wait container
+        {:wait-strategy :log
+         :message \"accept connections\"})
   ```"
-  :wait-strategy)
+  (fn [_container options] (:wait-strategy options)))
 
-(defmethod wait :http
-  [{:keys [path
-           port
-           status-codes
-           tls
-           read-timeout
-           basic-credentials] :as options}
-   ^GenericContainer container]
-  (let [for-http (Wait/forHttp path)]
+(defn-spec ^:private wait-for-http any?
+  [^GenericContainer container ::spec.container/container
+   options :clj-test-containers.spec.container.wait/http]
+  (let [{:keys [path
+                port
+                status-codes
+                tls
+                read-timeout
+                basic-credentials]} options
+
+        for-http (Wait/forHttp path)]
     (when port
       (.forPort for-http port))
 
@@ -101,135 +106,43 @@
 
     (.waitingFor container for-http)
 
-    {:wait-for-http (dissoc options :strategy)}))
+    {:wait-for-http (dissoc options :wait-strategy)}))
 
-(defmethod wait :health
-  [_ ^GenericContainer container]
+(defmethod wait :http
+  [container options]
+  (wait-for-http container options))
+
+(defn-spec ^:private wait-for-health any?
+  [^GenericContainer container ::spec.container/container
+   _options :clj-test-containers.spec.container.wait/health]
   (.waitingFor container (Wait/forHealthcheck))
   {:wait-for-healthcheck true})
 
-(defmethod wait :log
-  [{:keys [message]} ^GenericContainer container]
+(defmethod wait :health
+  [^GenericContainer container options]
+  (wait-for-health container options))
+
+(defn-spec ^:private wait-for-log any?
+  [^GenericContainer container ::spec.container/container
+   {:keys [message]} :clj-test-containers.spec.container.wait/log]
   (let [log-message (str ".*" message ".*\\n")]
     (.waitingFor container (Wait/forLogMessage log-message 1))
     {:wait-for-log-message log-message}))
 
+(defmethod wait :log
+  [container options]
+  (wait-for-log container options))
+
 (defmethod wait :default [_ _] nil)
-
-(s/fdef init
-        :args (s/cat :init-options ::cs/init-options)
-        :ret ::cs/container)
-
-(defn init
-  "Sets the properties for a testcontainer instance"
-  [{:keys [^GenericContainer container
-           exposed-ports
-           env-vars
-           command
-           network
-           network-aliases
-           wait-for] :as init-options}]
-
-  (.setExposedPorts container (map int exposed-ports))
-
-  (doseq [[k v] env-vars]
-    (.addEnv container k v))
-
-  (when command
-    (.setCommand container ^"[Ljava.lang.String;" (into-array String command)))
-
-  (when network
-    (.setNetwork container (:network network)))
-
-  (when network-aliases
-    (.setNetworkAliases container network-aliases))
-
-  (merge init-options {:container container
-                       :exposed-ports (vec (.getExposedPorts container))
-                       :env-vars (into {} (.getEnvMap container))
-                       :host (.getHost container)
-                       :network network} (wait wait-for container)))
-
-(s/fdef create
-        :args (s/cat :create-options ::cs/create-options)
-        :ret ::cs/container)
-
-(defn create
-  "Creates a generic testcontainer and sets its properties"
-  [{:keys [image-name] :as options}]
-  (->> (GenericContainer. ^String image-name)
-       (assoc options :container)
-       init))
-
-(defn create-from-docker-file
-  "Creates a testcontainer from a provided Dockerfile"
-  [{:keys [docker-file] :as options}]
-  (->> (.withDockerfile (ImageFromDockerfile.)
-                        (Paths/get "." (into-array [docker-file])))
-       (GenericContainer.)
-       (assoc options :container)
-       init))
-
-(defn map-classpath-resource!
-  "Maps a resource in the classpath to the given container path. Should be
-  called before starting the container!"
-  [{:keys [^GenericContainer container] :as container-config}
-   {:keys [^String resource-path ^String container-path mode]}]
-  (assoc container-config
-         :container
-         (.withClasspathResourceMapping container
-                                        resource-path
-                                        container-path
-                                        (resolve-bind-mode mode))))
-
-(defn bind-filesystem!
-  "Binds a source from the filesystem to the given container path. Should be
-  called before starting the container!"
-  [{:keys [^GenericContainer container] :as container-config}
-   {:keys [^String host-path ^String container-path mode]}]
-  (assoc container-config
-         :container
-         (.withFileSystemBind container
-                              host-path
-                              container-path
-                              (resolve-bind-mode mode))))
-
-(defn copy-file-to-container!
-  "If a container is not yet started, adds a mapping from mountable file to
-  container path that will be copied to the container on startup. If the
-  container is already running, copy the file to the running container."
-  [{:keys [^GenericContainer container id] :as container-config}
-   {:keys [^String container-path ^String path type]}]
-  (let [^MountableFile mountable-file
-        (case type
-          :classpath-resource (MountableFile/forClasspathResource path)
-          :host-path          (MountableFile/forHostPath path))]
-    (if id
-      (do
-        (.copyFileToContainer container mountable-file container-path)
-        container-config)
-      (assoc container-config
-             :container
-             (.withCopyFileToContainer container
-                                       mountable-file
-                                       container-path)))))
-
-(defn execute-command!
-  "Executes a command in the container, and returns the result"
-  [{:keys [^GenericContainer container]} command]
-  (let [result (.execInContainer container (into-array command))]
-    {:exit-code (.getExitCode result)
-     :stdout    (.getStdout result)
-     :stderr    (.getStderr result)}))
 
 (defmulti log
   "Sets a log strategy on the container as a means of accessing the container
   logs.  It currently only supports a :string as the strategy to use.
 
   ## String Strategy
-  The :string strategy sets up a function in the returned map, under the
-  `string-log` key. This function enables the dumping of the logs when passed to
-  the `dump-logs` function.
+  The :string strategy sets up a function in the returned map, under the `log`
+  key. This function enables the dumping of the logs when passed to the
+  `dump-logs` function.
 
   Example:
 
@@ -244,59 +157,246 @@
   (tc/dump-logs container-config)
   ```
    "
-  :log-strategy)
+  (fn [_container options] (:log-strategy options)))
 
-(defmethod log :string
-  [_ ^GenericContainer container]
+(defn-spec ^:private ^:no-gen log-string ::spec.container/log
+  [^GenericContainer container ::spec.container/container]
   (let [to-string-consumer (ToStringConsumer.)]
     (.followOutput container to-string-consumer)
-    {:log (fn []
-            (-> (.toUtf8String to-string-consumer)
-                (clojure.string/replace #"\n+" "\n")))}))
+    #(-> (.toUtf8String to-string-consumer)
+         (str/replace #"\n+" "\n"))))
+
+(defmethod log :string
+  [container _]
+  (log-string container))
 
 (defmethod log :slf4j [_ _] nil) ;; Not yet implemented
 
 (defmethod log :default [_ _] nil) ;; Not yet implemented
 
-(defn dump-logs
-  "Dumps the logs found by invoking the function on the :string-log key"
-  [container-config]
-  ((:log container-config)))
+(declare map->StartedContainer)
 
-(defn start!
+(defrecord StoppedContainer
+  [^GenericContainer container
+   command
+   docker-file
+   env-vars
+   exposed-ports
+   host
+   image-name
+   log-to
+   network
+   network-aliases
+   wait-for
+   wait-for-http
+   wait-for-healthcheck
+   wait-for-log-message]
+
+  i/StoppedContainer
+
+  (map-classpath-resource!
+    [this {:keys [^String resource-path ^String container-path mode]}]
+    (assoc this
+           :container
+           (.withClasspathResourceMapping container
+                                          resource-path
+                                          container-path
+                                          (resolve-bind-mode mode))))
+
+
+  (bind-filesystem!
+    [this {:keys [^String host-path ^String container-path mode]}]
+    (assoc this
+           :container
+           (.withFileSystemBind container
+                                host-path
+                                container-path
+                                (resolve-bind-mode mode))))
+
+
+  (start!
+    [this]
+    (.start container)
+    (let [id           (.getContainerId container)
+          map-ports-xf (map #(vector % (.getMappedPort container %)))
+          mapped-ports (into {} map-ports-xf exposed-ports)
+          logger       (log container log-to)]
+      (-> this
+          (assoc :id id :mapped-ports mapped-ports :log logger)
+          (dissoc :log-to)
+          map->StartedContainer)))
+
+
+  i/CopyFileToContainer
+
+  (copy-file-to-container!
+    [this mountable-file container-path]
+    (assoc this
+           :container
+           (.withCopyFileToContainer container
+                                     ^MountableFile mountable-file
+                                     ^String container-path))))
+
+(defrecord StartedContainer
+  [^GenericContainer container
+   command
+   docker-file
+   env-vars
+   exposed-ports
+   id
+   image-name
+   mapped-ports
+   log
+   network
+   network-aliases
+   wait-for
+   wait-for-http
+   wait-for-healthcheck
+   wait-for-log-message]
+
+  i/StartedContainer
+
+  (execute-command!
+    [this command]
+    (let [result (.execInContainer container (into-array command))]
+      {:exit-code (.getExitCode result)
+       :stdout    (.getStdout result)
+       :stderr    (.getStderr result)}))
+
+
+  (dump-logs
+    [this]
+    (log))
+
+
+  (stop!
+    [this]
+    (.stop container)
+    (-> this
+        (dissoc :id :log :mapped-ports)
+        map->StoppedContainer))
+
+
+  i/CopyFileToContainer
+
+  (copy-file-to-container!
+    [this mountable-file container-path]
+    (.copyFileToContainer container
+                          ^MountableFile mountable-file
+                          ^String container-path)
+    this))
+
+(defn-spec init ::spec/stopped-container
+  "Sets the properties for a testcontainer instance"
+  [options ::spec/init-options]
+  (let [{:keys [^GenericContainer container
+                exposed-ports
+                env-vars
+                command
+                log-to
+                network
+                network-aliases
+                wait-for]} options]
+
+    (.setExposedPorts container (map int exposed-ports))
+
+    (doseq [[k v] env-vars]
+      (.addEnv container k v))
+
+    (when command
+      (.setCommand container
+                   ^"[Ljava.lang.String;" (into-array String command)))
+
+    (when network
+      (.setNetwork container (:network network)))
+
+    (when network-aliases
+      (.setNetworkAliases container network-aliases))
+
+    (-> options
+        (assoc :exposed-ports (vec (.getExposedPorts container))
+               :env-vars      (into {} (.getEnvMap container))
+               :host          (.getHost container)
+               :log-to        log-to
+               :network       network)
+        (merge (wait container wait-for))
+        map->StoppedContainer)))
+
+(defn-spec create ::spec/stopped-container
+  "Creates a generic testcontainer and sets its properties"
+  [{:keys [^String image-name] :as options} ::spec/create-options]
+  (->> (GenericContainer. image-name)
+       (assoc options :container)
+       init))
+
+(defn-spec ^:no-gen create-from-docker-file ::spec/stopped-container
+  "Creates a testcontainer from a provided Dockerfile"
+  [{:keys [docker-file] :as options} ::spec/create-from-docker-file-options]
+  (let [path (Paths/get "." (into-array String [docker-file]))]
+    (->> (.withDockerfile (ImageFromDockerfile.) path)
+         (GenericContainer.)
+         (assoc options :container)
+         init)))
+
+(defn-spec ^:no-gen map-classpath-resource! ::spec/stopped-container
+  "Maps a resource in the classpath to the given container path. Should be
+  called before starting the container!"
+  [config  ::spec/stopped-container
+   options ::spec/map-classpath-resource!-options]
+  (i/map-classpath-resource! config options))
+
+(defn-spec ^:no-gen bind-filesystem! ::spec/stopped-container
+  "Binds a source from the filesystem to the given container path. Should be
+  called before starting the container!"
+  [config  ::spec/stopped-container
+   options ::spec/bind-filesystem!-options]
+  (i/bind-filesystem! config options))
+
+(defn-spec ^:no-gen copy-file-to-container! any?
+  "If a container is not yet started, adds a mapping from mountable file to
+  container path that will be copied to the container on startup. If the
+  container is already running, copy the file to the running container"
+  [config  ::spec/container
+   options ::spec/copy-file-to-container!-options]
+  (let [{:keys [type ^String path container-path]} options
+
+        mountable-file (case type
+                         :classpath-resource
+                         (MountableFile/forClasspathResource path)
+                         :host-path
+                         (MountableFile/forHostPath path))]
+    (i/copy-file-to-container! config
+                               mountable-file
+                               container-path)))
+
+(defn-spec ^:no-gen execute-command! ::spec/execute-command-result
+  "Executes a command in the container, and returns the result"
+  [config  ::spec/started-container
+   command ::spec/command]
+  (i/execute-command! config command))
+
+(defn-spec ^:no-gen dump-logs string?
+  "Dumps the logs found by invoking the function on the :log key"
+  [config ::spec/started-container]
+  (i/dump-logs config))
+
+(defn-spec ^:no-gen start! ::spec/started-container
   "Starts the underlying testcontainer instance and adds new values to the
   response map, e.g. :id and :first-mapped-port"
-  [{:keys [^GenericContainer container
-           log-to
-           exposed-ports] :as container-config}]
-  (.start container)
-  (let [map-port (fn map-port
-                   [port]
-                   [port (.getMappedPort container port)])
-        mapped-ports (into {} (map map-port) exposed-ports)
-        logger (log log-to container)]
-    (-> container-config
-        (merge {:id (.getContainerId container) :mapped-ports mapped-ports} logger)
-        (dissoc :log-to))))
+  [config ::spec/stopped-container]
+  (i/start! config))
 
-(defn stop!
+(defn-spec ^:no-gen stop! ::spec/stopped-container
   "Stops the underlying container"
-  [{:keys [^GenericContainer container] :as container-config}]
-  (.stop container)
-  (dissoc container-config :id :string-log :mapped-ports))
+  [config ::spec/started-container]
+  (i/stop! config))
 
-(s/fdef create-network
-        :args (s/alt :nullary (s/cat)
-                     :unary (s/cat :create-network-options
-                                   ::cs/create-network-options))
-        :ret ::cs/network)
-
-(defn create-network
+(defn-spec create-network ::spec.container/network
   "Creates a network. The optional map accepts config values for enabling ipv6
   and setting the driver"
   ([]
    (create-network {}))
-  ([{:keys [ipv6 driver]}]
+  ([{:keys [ipv6 driver]} ::spec/create-network-options]
    (let [builder (Network/builder)]
      (when ipv6
        (.enableIpv6 builder true))
@@ -306,8 +406,8 @@
 
      (let [network (.build builder)]
        {:network network
-        :name (.getName network)
-        :ipv6 (.getEnableIpv6 network)
-        :driver (.getDriver network)}))))
+        :name    (.getName network)
+        :ipv6    (.getEnableIpv6 network)
+        :driver  (.getDriver network)}))))
 
 (def ^:deprecated init-network create-network)
